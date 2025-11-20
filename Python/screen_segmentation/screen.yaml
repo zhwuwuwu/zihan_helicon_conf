@@ -1,0 +1,13 @@
+path: ./dataset
+train: images/train
+val: images/val
+
+names:
+  0: ppt_content
+  1: word_content
+  2: excel_content
+  3: pdf_content
+  4: txt_content
+  5: web_content
+  6: email_content
+  7: onenote_content

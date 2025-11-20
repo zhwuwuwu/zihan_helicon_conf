@@ -1,0 +1,7 @@
+{
+    "app": {
+        "ocr_device": "CPU",
+        "m3_device": "GPU",
+        "enable_rerank": false
+    }
+}
