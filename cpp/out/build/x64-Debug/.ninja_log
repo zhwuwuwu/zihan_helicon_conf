@@ -1,0 +1,9 @@
+# ninja log v6
+284	7248	7853933656642745	test/CMakeFiles/SDKTest.dir/SDKTest.cpp.obj	7ba7eaec94a569ea
+158	7340	7853933655499559	src/CMakeFiles/HeliconSearchSDK.dir/modules/vlm/VLMProcessor.cpp.obj	1c5aef675f21427c
+10113	14862	7853933780771172	lib/HeliconSearchSDK.lib	5ea3e8cfc2938192
+210	7298	7853933656019189	src/CMakeFiles/HeliconSearchSDK.dir/sdk_main.cpp.obj	adedf16925deb6c2
+14863	21532	7853933802560822	bin/SDKTest.exe	18c79c111039d7a8
+69	7557	7853933654579731	src/CMakeFiles/HeliconSearchSDK.dir/meeting_manager/MeetingManager.cpp.obj	d6773a81e0bc2e9e
+120	10111	7853933655062592	src/CMakeFiles/HeliconSearchSDK.dir/modules/chineseclip/ChineseCLIPProcessor.cpp.obj	8c0926383b5a6b5c
+10113	14862	7853933780771172	bin/HeliconSearchSDK.dll	5ea3e8cfc2938192

@@ -1,0 +1,273 @@
+#include "VLMModule.h"
+#include "VLMProcessor.h"
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+#include <filesystem>
+#include <algorithm>
+
+namespace fs = std::filesystem;
+
+// 全局状态管理
+static bool g_vlm_initialized = false;
+static std::mutex g_vlm_mutex;
+static std::unordered_map<VLM_Handle, std::unique_ptr<VLMProcessor>> g_processors;
+static uint64_t g_next_handle = 1;
+
+// 内部辅助函数
+static VLM_Handle GenerateHandle() {
+    return reinterpret_cast<VLM_Handle>(g_next_handle++);
+}
+
+static VLMProcessor* GetProcessor(VLM_Handle handle) {
+    auto it = g_processors.find(handle);
+    return (it != g_processors.end()) ? it->second.get() : nullptr;
+}
+
+// 实现C接口
+extern "C" {
+
+HELICON_API VLM_ErrorCode VLM_Initialize() {
+    std::lock_guard<std::mutex> lock(g_vlm_mutex);
+    
+    if (g_vlm_initialized) {
+        return VLM_SUCCESS;
+    }
+    
+    try {
+        std::cout << "[VLM] Initializing VLM module..." << std::endl;
+        
+        // 初始化VLM模块的全局资源
+        g_processors.clear();
+        g_next_handle = 1;
+        
+        g_vlm_initialized = true;
+        std::cout << "[VLM] VLM module initialized successfully" << std::endl;
+        
+        return VLM_SUCCESS;
+    }
+    catch (const std::exception& e) {
+        std::cout << "[VLM] Initialization failed: " << e.what() << std::endl;
+        return VLM_ERROR_UNKNOWN;
+    }
+}
+
+HELICON_API void VLM_Cleanup() {
+    std::lock_guard<std::mutex> lock(g_vlm_mutex);
+    
+    if (!g_vlm_initialized) {
+        return;
+    }
+    
+    std::cout << "[VLM] Cleaning up VLM module..." << std::endl;
+    
+    // 释放所有处理器
+    g_processors.clear();
+    
+    g_vlm_initialized = false;
+    std::cout << "[VLM] VLM module cleanup completed" << std::endl;
+}
+
+HELICON_API VLM_Handle VLM_CreateProcessor(
+    const char* so_path,
+    const char* weights_path,
+    uint32_t flag,
+    const char* default_prompt) {
+    
+    std::lock_guard<std::mutex> lock(g_vlm_mutex);
+    
+    if (!g_vlm_initialized) {
+        std::cout << "[VLM] Module not initialized" << std::endl;
+        return nullptr;
+    }
+    
+    if (!so_path || !weights_path) {
+        std::cout << "[VLM] Invalid parameters" << std::endl;
+        return nullptr;
+    }
+    
+    try {
+        auto processor = std::make_unique<VLMProcessor>(
+            so_path, weights_path, flag, default_prompt ? default_prompt : ""
+        );
+        
+        VLM_Handle handle = GenerateHandle();
+        g_processors[handle] = std::move(processor);
+        
+        std::cout << "[VLM] Processor created successfully" << std::endl;
+        return handle;
+    }
+    catch (const std::exception& e) {
+        std::cout << "[VLM] Failed to create processor: " << e.what() << std::endl;
+        return nullptr;
+    }
+}
+
+HELICON_API void VLM_ReleaseProcessor(VLM_Handle handle) {
+    std::lock_guard<std::mutex> lock(g_vlm_mutex);
+    
+    if (!handle) {
+        return;
+    }
+    
+    auto it = g_processors.find(handle);
+    if (it != g_processors.end()) {
+        std::cout << "[VLM] Releasing processor" << std::endl;
+        g_processors.erase(it);
+    }
+}
+
+HELICON_API VLM_ErrorCode VLM_InferenceImages(
+    VLM_Handle handle,
+    const VLM_ImageInput* input_list,
+    uint32_t input_count,
+    const char* prompt,
+    VLM_InferenceResult* results,
+    uint32_t* result_count) {
+    
+    std::lock_guard<std::mutex> lock(g_vlm_mutex);
+    
+    if (!handle || !input_list || !results || !result_count) {
+        return VLM_ERROR_INVALID_PARAM;
+    }
+    
+    VLMProcessor* processor = GetProcessor(handle);
+    if (!processor) {
+        return VLM_ERROR_MODEL_NOT_LOADED;
+    }
+    
+    try {
+        // 转换输入格式
+        std::vector<ImageInput> cpp_inputs;
+        for (uint32_t i = 0; i < input_count; ++i) {
+            cpp_inputs.push_back({input_list[i].path});
+        }
+        
+        // 执行推理
+        std::vector<std::string> cpp_results = processor->Inference(
+            cpp_inputs, prompt ? prompt : ""
+        );
+        
+        // 转换输出格式
+        *result_count = static_cast<uint32_t>(cpp_results.size());
+        for (size_t i = 0; i < cpp_results.size() && i < input_count; ++i) {
+            const std::string& result_text = cpp_results[i];
+            results[i].length = static_cast<uint32_t>(result_text.length());
+            results[i].text = new char[result_text.length() + 1];
+            strcpy_s(results[i].text, result_text.length() + 1, result_text.c_str());
+        }
+        
+        return VLM_SUCCESS;
+    }
+    catch (const std::exception& e) {
+        std::cout << "[VLM] Inference failed: " << e.what() << std::endl;
+        return VLM_ERROR_INFERENCE_FAILED;
+    }
+}
+
+HELICON_API VLM_ErrorCode VLM_InferenceText(
+    VLM_Handle handle,
+    const char* input_text,
+    char* output_text,
+    uint32_t* output_length,
+    uint32_t max_output_length) {
+    
+    std::lock_guard<std::mutex> lock(g_vlm_mutex);
+    
+    if (!handle || !input_text || !output_text || !output_length) {
+        return VLM_ERROR_INVALID_PARAM;
+    }
+    
+    VLMProcessor* processor = GetProcessor(handle);
+    if (!processor) {
+        return VLM_ERROR_MODEL_NOT_LOADED;
+    }
+    
+    try {
+        std::string result = processor->InferenceText(input_text);
+        
+        if (result.length() >= max_output_length) {
+            result = result.substr(0, max_output_length - 1);
+        }
+        
+        strcpy_s(output_text, max_output_length, result.c_str());
+        *output_length = static_cast<uint32_t>(result.length());
+        
+        return VLM_SUCCESS;
+    }
+    catch (const std::exception& e) {
+        std::cout << "[VLM] Text inference failed: " << e.what() << std::endl;
+        return VLM_ERROR_INFERENCE_FAILED;
+    }
+}
+
+HELICON_API void VLM_FreeResults(VLM_InferenceResult* results, uint32_t count) {
+    if (!results) {
+        return;
+    }
+    
+    for (uint32_t i = 0; i < count; ++i) {
+        delete[] results[i].text;
+        results[i].text = nullptr;
+        results[i].length = 0;
+    }
+}
+
+HELICON_API VLM_ErrorCode VLM_GetImagePaths(
+    const char* directory,
+    char*** image_paths,
+    uint32_t* path_count) {
+    
+    if (!directory || !image_paths || !path_count) {
+        return VLM_ERROR_INVALID_PARAM;
+    }
+    
+    try {
+        std::vector<std::string> extensions = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff"};
+        std::vector<std::string> found_paths;
+        
+        if (!fs::exists(directory) || !fs::is_directory(directory)) {
+            return VLM_ERROR_FILE_NOT_FOUND;
+        }
+        
+        for (const auto& entry : fs::directory_iterator(directory)) {
+            if (entry.is_regular_file()) {
+                std::string ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                
+                if (std::find(extensions.begin(), extensions.end(), ext) != extensions.end()) {
+                    found_paths.push_back(entry.path().string());
+                }
+            }
+        }
+        
+        // 分配内存并复制路径
+        *path_count = static_cast<uint32_t>(found_paths.size());
+        *image_paths = new char*[found_paths.size()];
+        
+        for (size_t i = 0; i < found_paths.size(); ++i) {
+            (*image_paths)[i] = new char[found_paths[i].length() + 1];
+            strcpy_s((*image_paths)[i], found_paths[i].length() + 1, found_paths[i].c_str());
+        }
+        
+        return VLM_SUCCESS;
+    }
+    catch (const std::exception& e) {
+        std::cout << "[VLM] Failed to get image paths: " << e.what() << std::endl;
+        return VLM_ERROR_UNKNOWN;
+    }
+}
+
+HELICON_API void VLM_FreeImagePaths(char** image_paths, uint32_t count) {
+    if (!image_paths) {
+        return;
+    }
+    
+    for (uint32_t i = 0; i < count; ++i) {
+        delete[] image_paths[i];
+    }
+    delete[] image_paths;
+}
+
+} // extern "C"
