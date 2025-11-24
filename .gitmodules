@@ -2,3 +2,6 @@
 	path = Python/openvino_notebooks
 	url = https://github.com/openvinotoolkit/openvino_notebooks.git
 	update = none
+[submodule "cpp"]
+	path = cpp
+	url = https://github.com/intel-sandbox/helicon.search.sdk.lsm.git
