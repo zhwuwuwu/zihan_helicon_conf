@@ -27,21 +27,5 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         $<TARGET_FILE:HeliconSearchSDK>
         $<TARGET_FILE_DIR:SDKTest>
-        COMMENT "Copying HeliconSearchSDK.dll"
-    )
-endif()
-
-# 复制 OpenVINO DLLs
-
-message(STATUS "OpenVINO_DIR: ${OpenVINO_DIR}")
-set(OPENVINO_BIN_PATH "${OpenVINO_DIR}/../../runtime/bin/intel64/Release")
-message(STATUS "Using OpenVINO Release DLLs from: ${OPENVINO_BIN_PATH}")
-
-if(WIN32)
-    add_custom_command(TARGET SDKTest POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${OpenVINO_DIR}/../../runtime/bin/intel64/Release"
-        "$<TARGET_FILE_DIR:SDKTest>"
-        COMMENT "Copying OpenVINO DLLs"
     )
 endif()

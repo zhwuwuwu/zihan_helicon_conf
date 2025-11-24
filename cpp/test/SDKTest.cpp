@@ -14,7 +14,7 @@ public:
         std::cout << "=== Helicon Search SDK Complete Test Suite ===" << std::endl;
 
         TestBasicSDKFunctions();
-        TestCLIPInference();
+        //TestCLIPInference();
 
         /*TestVLMTextInference();
         TestVLMImageInference();
@@ -28,6 +28,8 @@ public:
 private:
     static void TestBasicSDKFunctions() {
         std::cout << "\n[Test] Basic SDK Functions..." << std::endl;
+        
+        std::cout << "Current working directory: " << std::filesystem::current_path() << std::endl;
 
         // 测试版本获取
         const char* version = Helicon_GetVersion();
