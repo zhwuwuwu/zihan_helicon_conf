@@ -1,4 +1,13 @@
+# -*- coding: utf-8 -*-
 import sys
+import io
+
+# 强制设置stdout和stderr为UTF-8编码
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 import cv2
 import numpy as np
 import math
@@ -388,20 +397,52 @@ class PaddleOCRWithOpenVINO:
             beg_img_no: the beginning number of bounding boxes for each batch of text recognition inference
             batch_num: number of images for each batch
         """
+        # 【调试输出】函数输入参数
+        print(f"\n===== batch_text_box INPUT (Python) =====")
+        print(f"img_num: {img_num}, beg_img_no: {beg_img_no}, batch_num: {batch_num}")
+        print(f"indices: {indices.tolist()}")
+        print(f"end_img_no: {min(img_num, beg_img_no + batch_num)}")
+        
         norm_img_batch = []
         max_wh_ratio = 0
         end_img_no = min(img_num, beg_img_no + batch_num)
+        
+        # 【调试输出】Step 1: 计算max_wh_ratio
+        print(f"\nStep 1: Finding max_wh_ratio...")
         for ino in range(beg_img_no, end_img_no):
             h, w = img_crop_list[indices[ino]].shape[0:2]
             wh_ratio = w * 1.0 / h
+            print(f"  img[{ino}] -> crop_list[{indices[ino]}]: h={h}, w={w}, wh_ratio={wh_ratio:.4f}")
             max_wh_ratio = max(max_wh_ratio, wh_ratio)
+        print(f"Final max_wh_ratio: {max_wh_ratio:.4f}")
+        print(f"Calculated imgW (32 * max_wh_ratio): {int(32 * max_wh_ratio)}")
+        
+        # 【调试输出】Step 2: 调整大小和归一化
+        print(f"\nStep 2: Resizing and normalizing...")
         for ino in range(beg_img_no, end_img_no):
+            original_img = img_crop_list[indices[ino]]
+            print(f"  Processing img[{ino}] -> crop_list[{indices[ino]}]:")
+            print(f"    Original shape: {original_img.shape}")
+            
             norm_img = self.resize_norm_img(img_crop_list[indices[ino]], max_wh_ratio)
+            
+            print(f"    After resize_norm_img shape: {norm_img.shape}")
+            print(f"    Stats: min={np.min(norm_img):.6f}, max={np.max(norm_img):.6f}, mean={np.mean(norm_img):.6f}")
+            print(f"    Preview (first 10): {norm_img.flatten()[:10].tolist()}")
+            
             norm_img = norm_img[np.newaxis, :]
             norm_img_batch.append(norm_img)
 
         norm_img_batch = np.concatenate(norm_img_batch)
         norm_img_batch = norm_img_batch.copy()
+        
+        # 【调试输出】最终输出
+        print(f"\n===== batch_text_box OUTPUT (Python) =====")
+        print(f"Output batch shape: {norm_img_batch.shape}")
+        print(f"Output batch stats: min={np.min(norm_img_batch):.6f}, max={np.max(norm_img_batch):.6f}, mean={np.mean(norm_img_batch):.6f}")
+        print(f"Output batch preview (first 20): {norm_img_batch.flatten()[:20].tolist()}")
+        print("==========================================\n")
+        
         return norm_img_batch 
 
     def visualize_ocr_results(self, image_path, dt_boxes, rec_res, output_path=None):
@@ -619,16 +660,36 @@ class PaddleOCRWithOpenVINO:
                 norm_img_batch = self.batch_text_box(
                     img_crop_list, img_num, indices, beg_img_no, batch_num)
                 
+                # 【调试输出】识别模型输入统计
+                print(f"\n----- REC BATCH INPUT [{beg_img_no}-{min(beg_img_no + batch_num, img_num)}] -----")
+                print(f"Input shape: {norm_img_batch.shape}")
+                print(f"Input stats: min={np.min(norm_img_batch):.6f}, max={np.max(norm_img_batch):.6f}, mean={np.mean(norm_img_batch):.6f}")
+                print(f"Input preview (first 20): {norm_img_batch.flatten()[:20].tolist()}")
+                
                 # Run inference for text recognition.
                 #print('type norm_img_batch', norm_img_batch.shape)
                 #print('type self.rec_output_layer', type(self.rec_output_layer), self.rec_output_layer)
                 rec_results = self.rec_compiled_model([norm_img_batch])[self.rec_output_layer]
+                
+                # 【调试输出】识别模型输出统计
+                print("----- REC BATCH OUTPUT -----")
+                print(f"Output shape: {rec_results.shape}")
+                print(f"Output stats: min={np.min(rec_results):.6f}, max={np.max(rec_results):.6f}, mean={np.mean(rec_results):.6f}")
+                print(f"Output preview (first 20): {rec_results.flatten()[:20].tolist()}")
+                
                 #print('type rec_results', type(rec_results), rec_results)
                 # Postprocessing recognition results.
                 postprocess_op = processing.build_post_process(processing.postprocess_params)
                 rec_result = postprocess_op(rec_results)
+                
+                # 【调试输出】每个batch的解码结果
+                print("----- REC BATCH DECODE RESULTS -----")
                 for rno in range(len(rec_result)):
-                    rec_res[indices[beg_img_no + rno]] = rec_result[rno]
+                    original_idx = indices[beg_img_no + rno]
+                    text, conf = rec_result[rno]
+                    print(f"  decoded[{beg_img_no + rno} -> {original_idx}]: \"{text}\" (conf={conf:.4f})")
+                    rec_res[original_idx] = rec_result[rno]
+                
                 print('rec_res=', rec_res)
                 if rec_res:
                     txts = [rec_res[i][0] for i in range(len(rec_res))]
@@ -736,9 +797,9 @@ if __name__ == "__main__":
     elif input_path.is_file():
         test_images = [str(input_path)]
     else:
-        print(f"⚠️ 输入路径不存在: {input_path}")
+        print(f" 输入路径不存在: {input_path}")
     if not test_images:
-        print("⚠️ 未提供图像或目录，请在命令行参数中指定。")
+        print(" 未提供图像或目录，请在命令行参数中指定。")
     
     print(f"========== 开始测试 {len(test_images)} 个图像 ==========\n")
     
@@ -748,7 +809,7 @@ if __name__ == "__main__":
         print(f"{'='*60}")
         
         if not os.path.exists(image_path):
-            print(f"⚠️ 警告: 图像不存在，跳过: {image_path}\n")
+            print(f" 警告: 图像不存在，跳过: {image_path}\n")
             continue
         
         try:
