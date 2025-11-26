@@ -567,6 +567,20 @@ class PaddleOCRWithOpenVINO:
             det_results = self.det_compiled_model([test_image])[self.det_output_layer]
             stop_time = time.time()
 
+            # 【调试输出】检测模型推理结果统计
+            print("\n===== DETECTION MODEL OUTPUT (Python) =====")
+            print(f"Output tensor shape: {det_results.shape}")
+            print(f"Output statistics:")
+            print(f"  Min: {np.min(det_results)}")
+            print(f"  Max: {np.max(det_results)}")
+            print(f"  Mean: {np.mean(det_results)}")
+            positive_count = np.sum(det_results > 0.3)
+            total_elements = det_results.size
+            print(f"  Pixels > 0.3 (threshold): {positive_count} / {total_elements} ({100.0 * positive_count / total_elements:.2f}%)")
+            print(f"Original image size: {frame.shape[1]} x {frame.shape[0]}")
+            print(f"Detection input size: 640 x 640")
+            print("============================================\n")
+
             # Postprocessing for Paddle Detection.
             dt_boxes = self.post_processing_detection(frame, det_results)
             processing_times = []
