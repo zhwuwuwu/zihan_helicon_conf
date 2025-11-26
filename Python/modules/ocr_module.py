@@ -679,11 +679,14 @@ class PaddleOCRWithOpenVINO:
                 print("-"*70)
                 
                 if valid_boxes and valid_results:
-                    # 生成输出文件名
+                    # 创建输出文件夹并生成输出文件名
                     from pathlib import Path
                     input_path = Path(image)
-                    output_path = str(input_path.parent / f"{input_path.stem}_ocr_result_py.jpg")
-                    log_path = str(input_path.parent / f"{input_path.stem}_ocr_result_py.log")
+                    output_dir = input_path.parent / "output"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    output_path = str(output_dir / f"{input_path.stem}_ocr_result_py.jpg")
+                    log_path = str(output_dir / f"{input_path.stem}_ocr_result_py.log")
                     
                     # 可视化
                     self.visualize_ocr_results(image, valid_boxes, valid_results, output_path)
@@ -724,10 +727,12 @@ if __name__ == "__main__":
     #     # 可以添加更多图像路径
     # ]
     test_images = []
-    input_path = Path("C:\\netshare\\test_imgs\\group2").expanduser()
+    input_path = Path("C:\\netshare\\test_imgs\\group3").expanduser()
     if input_path.is_dir():
         image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
-        test_images = [str(p) for p in sorted(input_path.rglob('*')) if p.suffix.lower() in image_exts]
+        # 排除output文件夹中的文件
+        test_images = [str(p) for p in sorted(input_path.rglob('*')) 
+                      if p.suffix.lower() in image_exts and 'output' not in p.parts]
     elif input_path.is_file():
         test_images = [str(input_path)]
     else:
