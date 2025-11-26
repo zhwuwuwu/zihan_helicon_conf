@@ -404,6 +404,85 @@ class PaddleOCRWithOpenVINO:
         norm_img_batch = norm_img_batch.copy()
         return norm_img_batch 
 
+    def visualize_ocr_results(self, image_path, dt_boxes, rec_res, output_path=None):
+        """
+        可视化OCR结果，在图像上绘制检测框和识别文本
+        
+        Args:
+            image_path: 原始图像路径
+            dt_boxes: 检测框列表
+            rec_res: 识别结果列表 [(text, confidence), ...]
+            output_path: 输出图像路径，如果为None则显示图像
+        """
+        import cv2
+        import numpy as np
+        
+        # 读取图像
+        image = cv2.imread(image_path)
+        if image is None:
+            print(f"无法读取图像: {image_path}")
+            return
+        
+        # 创建图像副本用于绘制
+        vis_image = image.copy()
+        
+        # 为每个检测框绘制矩形和文本
+        for idx, (box, (text, conf)) in enumerate(zip(dt_boxes, rec_res)):
+            # 转换坐标为整数
+            box = np.array(box).astype(np.int32)
+            
+            # 绘制检测框（绿色）
+            cv2.polylines(vis_image, [box], True, (0, 255, 0), 2)
+            
+            # 在检测框上方绘制文本和置信度
+            text_pos = (int(box[0][0]), int(box[0][1]) - 10)
+            label = f"{text} ({conf:.2f})"
+            
+            # 添加文本背景
+            (text_width, text_height), baseline = cv2.getTextSize(
+                label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
+            )
+            cv2.rectangle(
+                vis_image,
+                (text_pos[0], text_pos[1] - text_height - baseline),
+                (text_pos[0] + text_width, text_pos[1] + baseline),
+                (0, 255, 0),
+                -1
+            )
+            
+            # 绘制文本（黑色）
+            cv2.putText(
+                vis_image,
+                label,
+                text_pos,
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 0),
+                2
+            )
+            
+            # 绘制索引号
+            cv2.putText(
+                vis_image,
+                str(idx),
+                (int(box[0][0]), int(box[0][1]) + 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 0, 0),
+                2
+            )
+        
+        # 保存或显示图像
+        if output_path:
+            cv2.imwrite(output_path, vis_image)
+            print(f"可视化结果已保存到: {output_path}")
+        else:
+            cv2.imshow('OCR Results', vis_image)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+        
+        return vis_image
+    
     def filter_ocr_results(self, rec_res, min_confidence=0.95, remove_special=True, remove_short=True):
         """
         过滤OCR识别结果
@@ -537,6 +616,15 @@ class PaddleOCRWithOpenVINO:
                     full_text += content
                     #print('text=', content)
             print("==== REC DONE ====")
+            
+            # 可视化结果
+            if rec_res and dt_boxes:
+                # 生成输出文件名
+                from pathlib import Path
+                input_path = Path(image)
+                output_path = str(input_path.parent / f"{input_path.stem}_ocr_result_py.jpg")
+                self.visualize_ocr_results(image, dt_boxes, rec_res, output_path)
+            
             return full_text
 
         # any different error
@@ -548,7 +636,8 @@ class PaddleOCRWithOpenVINO:
 # 使用示例
 if __name__ == "__main__":
     ocr = PaddleOCRWithOpenVINO(models_dir='.\\models\\paddle_ocr', download_models=False)
-    image_path = "C:\\Users\\zihanwu\\Downloads\\ocr_test1.png"
+    # image_path = "C:\\Users\\zihanwu\\Downloads\\ocr_test1.png"
+    image_path = "C:\\netshare\\test_imgs\\ocr_test1.png"
 
     for i in range(1):
         start = time.time()
