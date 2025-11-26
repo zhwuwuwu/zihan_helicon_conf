@@ -410,67 +410,76 @@ class PaddleOCRWithOpenVINO:
         
         Args:
             image_path: 原始图像路径
-            dt_boxes: 检测框列表
+            dt_boxes: 检测框列表（基于缩放后图像的坐标）
             rec_res: 识别结果列表 [(text, confidence), ...]
             output_path: 输出图像路径，如果为None则显示图像
         """
         import cv2
         import numpy as np
+        from PIL import Image, ImageDraw, ImageFont
         
-        # 读取图像
-        image = cv2.imread(image_path)
-        if image is None:
+        # 读取原始图像（未缩放）
+        original_image = cv2.imread(image_path)
+        if original_image is None:
             print(f"无法读取图像: {image_path}")
             return
         
-        # 创建图像副本用于绘制
-        vis_image = image.copy()
+        # 转换为PIL图像以支持中文显示
+        pil_image = Image.fromarray(cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(pil_image)
+        
+        # 加载中文字体
+        try:
+            # 尝试使用系统中文字体
+            font_path = str(self.font_path) if hasattr(self, 'font_path') and self.font_path.exists() else None
+            if font_path:
+                font = ImageFont.truetype(font_path, 20)
+                font_small = ImageFont.truetype(font_path, 16)
+            else:
+                # Windows系统字体路径
+                import platform
+                if platform.system() == 'Windows':
+                    font = ImageFont.truetype('C:/Windows/Fonts/simhei.ttf', 20)
+                    font_small = ImageFont.truetype('C:/Windows/Fonts/simhei.ttf', 16)
+                else:
+                    font = ImageFont.load_default()
+                    font_small = ImageFont.load_default()
+        except:
+            # 如果加载失败，使用默认字体
+            font = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+            print("警告: 无法加载中文字体，使用默认字体")
         
         # 为每个检测框绘制矩形和文本
         for idx, (box, (text, conf)) in enumerate(zip(dt_boxes, rec_res)):
             # 转换坐标为整数
             box = np.array(box).astype(np.int32)
             
-            # 绘制检测框（绿色）
-            cv2.polylines(vis_image, [box], True, (0, 255, 0), 2)
+            # 绘制检测框（绿色）- 将box转换为PIL格式的坐标列表
+            box_points = [(int(pt[0]), int(pt[1])) for pt in box]
+            draw.polygon(box_points, outline=(0, 255, 0), width=2)
             
-            # 在检测框上方绘制文本和置信度
-            text_pos = (int(box[0][0]), int(box[0][1]) - 10)
+            # 准备文本标签
             label = f"{text} ({conf:.2f})"
             
-            # 添加文本背景
-            (text_width, text_height), baseline = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
-            )
-            cv2.rectangle(
-                vis_image,
-                (text_pos[0], text_pos[1] - text_height - baseline),
-                (text_pos[0] + text_width, text_pos[1] + baseline),
-                (0, 255, 0),
-                -1
-            )
+            # 在检测框上方绘制文本
+            text_pos = (int(box[0][0]), max(0, int(box[0][1]) - 25))
+            
+            # 获取文本边界框
+            bbox = draw.textbbox(text_pos, label, font=font_small)
+            
+            # 绘制文本背景（绿色）
+            draw.rectangle(bbox, fill=(0, 255, 0))
             
             # 绘制文本（黑色）
-            cv2.putText(
-                vis_image,
-                label,
-                text_pos,
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 0),
-                2
-            )
+            draw.text(text_pos, label, font=font_small, fill=(0, 0, 0))
             
-            # 绘制索引号
-            cv2.putText(
-                vis_image,
-                str(idx),
-                (int(box[0][0]), int(box[0][1]) + 20),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (255, 0, 0),
-                2
-            )
+            # 绘制索引号（红色）
+            idx_pos = (int(box[0][0]), int(box[0][1]) + 5)
+            draw.text(idx_pos, str(idx), font=font_small, fill=(255, 0, 0))
+        
+        # 转换回OpenCV格式
+        vis_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
         
         # 保存或显示图像
         if output_path:
@@ -628,16 +637,71 @@ class PaddleOCRWithOpenVINO:
                     #full_text += txts
                     content = self.filter_ocr_results(rec_res=rec_res)
                     full_text += content
+                    full_text += '\n'
                     #print('text=', content)
-            print("==== REC DONE ====")
+            print("==== REC DONE =====")
             
-            # 可视化结果
+            # 输出详细识别结果
+            print("\n" + "="*70)
+            print("OCR识别结果详情")
+            print("="*70)
+            
+            # 准备日志内容
+            log_lines = []
+            log_lines.append("\n" + "="*70)
+            log_lines.append(f"图像: {image}")
+            log_lines.append(f"检测到 {len(dt_boxes)} 个文本区域")
+            log_lines.append("="*70 + "\n")
+            
+            # 可视化结果 - 过滤空结果以确保boxes和results一一对应
             if rec_res and dt_boxes:
-                # 生成输出文件名
-                from pathlib import Path
-                input_path = Path(image)
-                output_path = str(input_path.parent / f"{input_path.stem}_ocr_result_py.jpg")
-                self.visualize_ocr_results(image, dt_boxes, rec_res, output_path)
+                # 过滤出有效的识别结果并输出详情
+                valid_boxes = []
+                valid_results = []
+                valid_idx = 0
+                
+                for box, (text, conf) in zip(dt_boxes, rec_res):
+                    if text and len(text.strip()) > 0 and conf > 0:
+                        valid_boxes.append(box)
+                        valid_results.append((text, conf))
+                        
+                        # 输出到控制台
+                        box_str = ", ".join([f"({int(pt[0])},{int(pt[1])})" for pt in box])
+                        print(f"[{valid_idx}] 文本: {text} | 置信度: {conf:.4f} | 位置: [{box_str}]")
+                        
+                        # 写入日志
+                        log_lines.append(f"[{valid_idx}] 文本: {text}")
+                        log_lines.append(f"    置信度: {conf:.4f}")
+                        log_lines.append(f"    边界框: [{box_str}]\n")
+                        
+                        valid_idx += 1
+                
+                print("-"*70)
+                
+                if valid_boxes and valid_results:
+                    # 生成输出文件名
+                    from pathlib import Path
+                    input_path = Path(image)
+                    output_path = str(input_path.parent / f"{input_path.stem}_ocr_result_py.jpg")
+                    log_path = str(input_path.parent / f"{input_path.stem}_ocr_result_py.log")
+                    
+                    # 可视化
+                    self.visualize_ocr_results(image, valid_boxes, valid_results, output_path)
+                    
+                    # 输出最终文本
+                    print(f"\n最终文本 ({len(full_text)} 字符):\n{full_text}")
+                    print("="*70 + "\n")
+                    
+                    # 写入日志文件
+                    log_lines.append(f"最终文本: {full_text}")
+                    log_lines.append("="*70)
+                    
+                    try:
+                        with open(log_path, 'w', encoding='utf-8') as f:
+                            f.write('\n'.join(log_lines))
+                        print(f"日志已保存到: {log_path}")
+                    except Exception as e:
+                        print(f"警告: 无法保存日志文件: {e}")
             
             return full_text
 
@@ -650,11 +714,51 @@ class PaddleOCRWithOpenVINO:
 # 使用示例
 if __name__ == "__main__":
     ocr = PaddleOCRWithOpenVINO(models_dir='.\\models\\paddle_ocr', download_models=False)
-    # image_path = "C:\\Users\\zihanwu\\Downloads\\ocr_test1.png"
-    image_path = "C:\\netshare\\test_imgs\\ocr_test1.png"
-
-    for i in range(1):
-        start = time.time()
-        text = ocr.run_paddle_ocr(image=image_path)
-        print(f'ROUND{i} - TIME', time.time()-start)
-    print("Extracted Text:", text)
+    
+    # 支持多个图像测试
+    # test_images = [
+    #     # "C:\\netshare\\test_imgs\\ocr_test1.png",
+    #     # "C:\\netshare\\test_imgs\\ocr_test2.png",
+    #     # "C:\\netshare\\test_imgs\\ocr_test3.png",
+    #     # "C:\\netshare\\test_imgs\\ocr_test4.png",
+    #     # 可以添加更多图像路径
+    # ]
+    test_images = []
+    input_path = Path("C:\\netshare\\test_imgs\\group2").expanduser()
+    if input_path.is_dir():
+        image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
+        test_images = [str(p) for p in sorted(input_path.rglob('*')) if p.suffix.lower() in image_exts]
+    elif input_path.is_file():
+        test_images = [str(input_path)]
+    else:
+        print(f"⚠️ 输入路径不存在: {input_path}")
+    if not test_images:
+        print("⚠️ 未提供图像或目录，请在命令行参数中指定。")
+    
+    print(f"========== 开始测试 {len(test_images)} 个图像 ==========\n")
+    
+    for idx, image_path in enumerate(test_images):
+        print(f"\n{'='*60}")
+        print(f"测试图像 [{idx+1}/{len(test_images)}]: {image_path}")
+        print(f"{'='*60}")
+        
+        if not os.path.exists(image_path):
+            print(f"⚠️ 警告: 图像不存在，跳过: {image_path}\n")
+            continue
+        
+        try:
+            start = time.time()
+            text = ocr.run_paddle_ocr(image=image_path)
+            elapsed = time.time() - start
+            
+            print(f"\n{'─'*60}")
+            print(f"✓ 处理完成 - 耗时: {elapsed:.3f}秒")
+            print(f"识别文本: {text if text else '(未识别到文本)'}")
+            print(f"{'─'*60}\n")
+            
+        except Exception as e:
+            print(f"\n✗ 错误: 处理图像时出错: {e}\n")
+    
+    print(f"\n{'='*60}")
+    print("所有测试完成")
+    print(f"{'='*60}")
