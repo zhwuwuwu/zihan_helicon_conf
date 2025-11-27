@@ -598,16 +598,25 @@ class PaddleOCRWithOpenVINO:
         # Create a video player to play with target fps.
         try:
             # Grab the frame.
-            frame = cv2.imread(image)
-            if frame is None:
+            original_image = cv2.imread(image)
+            if original_image is None:
                 print("***frame is None")
                 return ''
+            
+            # 保存原始图像尺寸
+            original_height, original_width = original_image.shape[:2]
+            
             # If the frame is larger than full HD, reduce size to improve the performance.
             #scale = 1280 / max(frame.shape)
-            scale = 1920 / max(frame.shape)
+            scale = 1920 / max(original_image.shape)
+            frame = original_image
             if scale < 1:
-                frame = cv2.resize(src=frame, dsize=None, fx=scale, fy=scale,
+                frame = cv2.resize(src=original_image, dsize=None, fx=scale, fy=scale,
                                 interpolation=cv2.INTER_AREA)
+            
+            # 保存缩放后的图像尺寸
+            frame_height, frame_width = frame.shape[:2]
+            
             # Preprocess the image for text detection.
             test_image = self.image_preprocess(frame, 640)
 
@@ -627,12 +636,30 @@ class PaddleOCRWithOpenVINO:
             positive_count = np.sum(det_results > 0.3)
             total_elements = det_results.size
             print(f"  Pixels > 0.3 (threshold): {positive_count} / {total_elements} ({100.0 * positive_count / total_elements:.2f}%)")
-            print(f"Original image size: {frame.shape[1]} x {frame.shape[0]}")
+            print(f"Original image size: {original_width} x {original_height}")
+            print(f"Inference frame size: {frame_width} x {frame_height}")
             print(f"Detection input size: 640 x 640")
             print("============================================\n")
 
             # Postprocessing for Paddle Detection.
             dt_boxes = self.post_processing_detection(frame, det_results)
+            
+            # 【关键修复】如果进行了缩放，需要将坐标映射回原始图像尺寸
+            if original_width != frame_width or original_height != frame_height:
+                scale_x = original_width / frame_width
+                scale_y = original_height / frame_height
+                
+                print(f"[Python OCR] Restoring coordinates from scaled size ({frame_width}x{frame_height}) to original size ({original_width}x{original_height})")
+                
+                # 将所有检测框坐标映射回原始尺寸
+                dt_boxes_original = []
+                for box in dt_boxes:
+                    box_original = []
+                    for pt in box:
+                        box_original.append([pt[0] * scale_x, pt[1] * scale_y])
+                    dt_boxes_original.append(np.array(box_original))
+                # 转换回numpy数组以保持与sorted_boxes兼容
+                dt_boxes = np.array(dt_boxes_original)
             processing_times = []
             processing_times.append(stop_time - start_time)
             # Use processing times from last 200 frames.
@@ -643,7 +670,8 @@ class PaddleOCRWithOpenVINO:
             # Preprocess detection results for recognition.
             dt_boxes = processing.sorted_boxes(dt_boxes)
             batch_num = 6
-            img_crop_list, img_num, indices = self.prep_for_rec(dt_boxes, frame)
+            # 使用原始图像和已还原的坐标进行裁剪
+            img_crop_list, img_num, indices = self.prep_for_rec(dt_boxes, original_image)
             print("BOXES:", dt_boxes)
             print("==== DET TEXTUAL BBOX DONE ====")
             # print("IMG CROP LIST", img_crop_list)
@@ -788,7 +816,7 @@ if __name__ == "__main__":
     #     # 可以添加更多图像路径
     # ]
     test_images = []
-    input_path = Path("C:\\netshare\\test_imgs\\group3").expanduser()
+    input_path = Path("C:\\netshare\\test_imgs\\group2").expanduser()
     if input_path.is_dir():
         image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
         # 排除output文件夹中的文件
